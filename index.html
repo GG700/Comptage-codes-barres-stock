@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner Inventaire Excel</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f4f4f9; }
+        #reader { width: 100%; max-width: 500px; margin: auto; border: 2px solid #333; }
+        .controls { margin-top: 20px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+        button { padding: 10px 20px; cursor: pointer; border: none; border-radius: 5px; color: white; font-weight: bold; }
+        .btn-excel { background-color: #217346; }
+        .btn-reset { background-color: #d9534f; }
+        table { width: 100%; max-width: 500px; margin: 20px auto; border-collapse: collapse; background: white; }
+        th, td { border: 1px solid #ddd; padding: 10px; }
+        th { background-color: #eee; }
+    </style>
+</head>
+<body>
+
+    <h2>📦 Scanner d'Inventaire</h2>
+    
+    <div id="reader"></div>
+
+    <div class="controls">
+        <button class="btn-excel" onclick="exportToExcel()">📥 Télécharger Excel</button>
+        <button class="btn-reset" onclick="resetData()">🔄 Réinitialiser</button>
+    </div>
+
+    <h3>Résultats en temps réel</h3>
+    <table id="resultTable">
+        <thead>
+            <tr>
+                <th>Code Barre</th>
+                <th>Quantité</th>
+            </tr>
+        </thead>
+        <tbody id="inventoryBody"></tbody>
+    </table>
+
+    <script>
+        let inventory = JSON.parse(localStorage.getItem('inventory')) || {};
+
+        function updateTable() {
+            const body = document.getElementById('inventoryBody');
+            body.innerHTML = '';
+            for (const [code, count] of Object.entries(inventory)) {
+                const row = `<tr><td>${code}</td><td>${count}</td></tr>`;
+                body.innerHTML += row;
+            }
+            localStorage.setItem('inventory', JSON.stringify(inventory));
+        }
+
+        function onScanSuccess(decodedText) {
+            // Incrémenter le compteur
+            inventory[decodedText] = (inventory[decodedText] || 0) + 1;
+            updateTable();
+            
+            // Petit feedback sonore ou visuel optionnel ici
+            console.log(`Code détecté : ${decodedText}`);
+        }
+
+        function exportToExcel() {
+            const data = Object.entries(inventory).map(([code, count]) => ({ "Code Barre": code, "Quantité": count }));
+            const worksheet = XLSX.utils.json_to_sheet(data);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Inventaire");
+            XLSX.writeFile(workbook, "inventaire_codes.xlsx");
+        }
+
+        function resetData() {
+            if (confirm("Voulez-vous vraiment effacer toutes les données ?")) {
+                inventory = {};
+                updateTable();
+            }
+        }
+
+        // Initialisation du scanner
+        const html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+            { facingMode: "environment" }, 
+            { fps: 10, qrbox: { width: 250, height: 150 } },
+            onScanSuccess
+        );
+
+        updateTable();
+    </script>
+</body>
+</html>
