@@ -2,90 +2,193 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Inventaire Excel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Scanner Pro Excel</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f4f4f9; }
-        #reader { width: 100%; max-width: 500px; margin: auto; border: 2px solid #333; }
-        .controls { margin-top: 20px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
-        button { padding: 10px 20px; cursor: pointer; border: none; border-radius: 5px; color: white; font-weight: bold; }
-        .btn-excel { background-color: #217346; }
-        .btn-reset { background-color: #d9534f; }
-        table { width: 100%; max-width: 500px; margin: 20px auto; border-collapse: collapse; background: white; }
-        th, td { border: 1px solid #ddd; padding: 10px; }
-        th { background-color: #eee; }
+        :root {
+            --primary: #2563eb;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --dark: #1e293b;
+        }
+
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            margin: 0; padding: 15px; background: #f8fafc; color: var(--dark);
+        }
+
+        .container { max-width: 600px; margin: auto; }
+
+        h2 { text-align: center; color: var(--dark); margin-bottom: 20px; }
+
+        #reader { 
+            width: 100%; border-radius: 12px; overflow: hidden; 
+            border: none !important; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            background: white;
+        }
+
+        /* Barre de verrouillage après scan */
+        #lock-timer {
+            width: 100%; height: 8px; background: #e2e8f0;
+            margin-top: 10px; border-radius: 4px; overflow: hidden; display: none;
+        }
+        #lock-bar { height: 100%; background: var(--success); width: 0%; transition: width 0.1s linear; }
+
+        .controls { 
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; 
+        }
+
+        button {
+            padding: 12px; border: none; border-radius: 8px; color: white;
+            font-weight: 600; font-size: 14px; cursor: pointer; transition: opacity 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+
+        .btn-excel { background-color: #166534; }
+        .btn-reset { background-color: var(--danger); }
+        button:active { opacity: 0.7; }
+
+        .stats {
+            background: white; padding: 15px; border-radius: 12px;
+            box-shadow: 0 1px 3px rgb(0 0 0 / 0.1); margin-top: 10px;
+        }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { text-align: left; font-size: 12px; text-transform: uppercase; color: #64748b; padding-bottom: 8px; }
+        td { padding: 12px 0; border-top: 1px solid #f1f5f9; font-family: monospace; }
+        .qty-badge {
+            background: #dcfce7; color: #166534; padding: 4px 10px;
+            border-radius: 999px; font-weight: bold; font-family: sans-serif;
+        }
+
+        #last-scan {
+            font-weight: bold; color: var(--success); margin: 10px 0; min-height: 1.2em;
+        }
     </style>
 </head>
 <body>
 
-    <h2>📦 Scanner d'Inventaire</h2>
+<div class="container">
+    <h2>📦 Scanner Inventaire</h2>
     
     <div id="reader"></div>
+    
+    <div id="lock-timer"><div id="lock-bar"></div></div>
+    <div id="last-scan">Prêt à scanner...</div>
 
     <div class="controls">
-        <button class="btn-excel" onclick="exportToExcel()">📥 Télécharger Excel</button>
-        <button class="btn-reset" onclick="resetData()">🔄 Réinitialiser</button>
+        <button class="btn-excel" onclick="exportToExcel()">📊 Export Excel</button>
+        <button class="btn-reset" onclick="resetData()">🗑️ Reset</button>
     </div>
 
-    <h3>Résultats en temps réel</h3>
-    <table id="resultTable">
-        <thead>
-            <tr>
-                <th>Code Barre</th>
-                <th>Quantité</th>
-            </tr>
-        </thead>
-        <tbody id="inventoryBody"></tbody>
-    </table>
+    <div class="stats">
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th style="text-align: right;">Qté</th>
+                </tr>
+            </thead>
+            <tbody id="inventoryBody"></tbody>
+        </table>
+    </div>
+</div>
 
-    <script>
-        let inventory = JSON.parse(localStorage.getItem('inventory')) || {};
+<script>
+    let inventory = JSON.parse(localStorage.getItem('inventory')) || {};
+    let isLocked = false;
+    const LOCK_TIME = 2000; // 2 secondes de pause entre scans
 
-        function updateTable() {
-            const body = document.getElementById('inventoryBody');
-            body.innerHTML = '';
-            for (const [code, count] of Object.entries(inventory)) {
-                const row = `<tr><td>${code}</td><td>${count}</td></tr>`;
-                body.innerHTML += row;
-            }
-            localStorage.setItem('inventory', JSON.stringify(inventory));
+    function updateTable() {
+        const body = document.getElementById('inventoryBody');
+        body.innerHTML = '';
+        
+        // Trier pour afficher le dernier scan en haut
+        const entries = Object.entries(inventory).reverse();
+        
+        for (const [code, count] of entries) {
+            body.innerHTML += `
+                <tr>
+                    <td>${code}</td>
+                    <td style="text-align: right;"><span class="qty-badge">${count}</span></td>
+                </tr>`;
         }
+        localStorage.setItem('inventory', JSON.stringify(inventory));
+    }
 
-        function onScanSuccess(decodedText) {
-            // Incrémenter le compteur
-            inventory[decodedText] = (inventory[decodedText] || 0) + 1;
-            updateTable();
-            
-            // Petit feedback sonore ou visuel optionnel ici
-            console.log(`Code détecté : ${decodedText}`);
-        }
+    function onScanSuccess(decodedText) {
+        if (isLocked) return;
 
-        function exportToExcel() {
-            const data = Object.entries(inventory).map(([code, count]) => ({ "Code Barre": code, "Quantité": count }));
-            const worksheet = XLSX.utils.json_to_sheet(data);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Inventaire");
-            XLSX.writeFile(workbook, "inventaire_codes.xlsx");
-        }
-
-        function resetData() {
-            if (confirm("Voulez-vous vraiment effacer toutes les données ?")) {
-                inventory = {};
-                updateTable();
-            }
-        }
-
-        // Initialisation du scanner
-        const html5QrCode = new Html5Qrcode("reader");
-        html5QrCode.start(
-            { facingMode: "environment" }, 
-            { fps: 10, qrbox: { width: 250, height: 150 } },
-            onScanSuccess
-        );
-
+        // Verrouillage
+        isLocked = true;
+        document.getElementById('last-scan').innerText = "✅ " + decodedText;
+        
+        // Mise à jour données
+        inventory[decodedText] = (inventory[decodedText] || 0) + 1;
         updateTable();
-    </script>
+
+        // Animation de la barre de progression
+        const timerDiv = document.getElementById('lock-timer');
+        const bar = document.getElementById('lock-bar');
+        timerDiv.style.display = 'block';
+        bar.style.width = '100%';
+        
+        let start = Date.now();
+        let interval = setInterval(() => {
+            let elapsed = Date.now() - start;
+            let progress = 100 - (elapsed / LOCK_TIME * 100);
+            bar.style.width = progress + '%';
+            
+            if (elapsed >= LOCK_TIME) {
+                clearInterval(interval);
+                isLocked = false;
+                timerDiv.style.display = 'none';
+                document.getElementById('last-scan').innerText = "Prêt...";
+            }
+        }, 50);
+    }
+
+    function exportToExcel() {
+        if (Object.keys(inventory).length === 0) {
+            alert("Aucune donnée à exporter.");
+            return;
+        }
+        const data = Object.entries(inventory).map(([code, count]) => ({ 
+            "Code Barre": code, 
+            "Quantité": count,
+            "Date Export": new Date().toLocaleDateString()
+        }));
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Inventaire");
+        XLSX.writeFile(workbook, "inventaire_" + new Date().getTime() + ".xlsx");
+    }
+
+    function resetData() {
+        if (confirm("Vider tout l'inventaire ? Cette action est irréversible.")) {
+            inventory = {};
+            updateTable();
+            document.getElementById('last-scan').innerText = "Prêt...";
+        }
+    }
+
+    // Configurer et lancer le scanner
+    const html5QrCode = new Html5Qrcode("reader");
+    const config = { 
+        fps: 15, 
+        qrbox: { width: 250, height: 150 },
+        aspectRatio: 1.0 
+    };
+
+    html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+    .catch(err => {
+        document.getElementById('last-scan').innerText = "Erreur caméra : " + err;
+    });
+
+    updateTable();
+</script>
+
 </body>
 </html>
